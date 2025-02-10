@@ -14,13 +14,12 @@ import (
 	"unicode/utf8"
 
 	"github.com/antonmedv/clipboard"
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/bubbles/v2/key"
+	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/expr-lang/expr"
 	"github.com/expr-lang/expr/vm"
 	"github.com/mattn/go-runewidth"
-	"github.com/muesli/termenv"
 	"github.com/sahilm/fuzzy"
 )
 
@@ -109,9 +108,6 @@ func main() {
 		}
 	}
 
-	output := termenv.NewOutput(os.Stderr)
-	lipgloss.SetColorProfile(output.ColorProfile())
-
 	m.list()
 
 	opts := []tea.ProgramOption{
@@ -122,8 +118,15 @@ func main() {
 	}
 
 	p := tea.NewProgram(m, opts...)
-	if _, err := p.Run(); err != nil {
+	lastm, err := p.Run()
+	if err != nil {
 		panic(err)
+	}
+
+	m = lastm.(*model)
+	if m.exitCode == 0 {
+		_, _ = fmt.Fprintln(os.Stderr) // Keep last item visible after prompt.
+		fmt.Println(m.path)            // Write to cd.
 	}
 
 	os.Exit(m.exitCode)
@@ -195,7 +198,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.r = 0
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		// Make undo work even if we are in fuzzy mode.
 		if key.Matches(msg, keyUndo) && len(m.toBeDeleted) > 0 {
 			m.toBeDeleted = m.toBeDeleted[:len(m.toBeDeleted)-1]
@@ -210,7 +213,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.search = m.search[:strlen(m.search)-1]
 					return m, nil
 				}
-			} else if msg.Type == tea.KeyRunes {
+			} else if len(msg.Text) > 0 {
 				m.updateSearch(msg)
 				// Save search id to clear only current search after delay.
 				// User may have already started typing next search.
@@ -231,7 +234,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.searchMode = false
 				}
 				return m, nil
-			} else if msg.Type == tea.KeyRunes {
+			} else if len(msg.Text) > 0 {
 				m.updateSearch(msg)
 				return m, nil
 			}
@@ -239,14 +242,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch {
 		case key.Matches(msg, keyForceQuit):
-			_, _ = fmt.Fprintln(os.Stderr) // Keep last item visible after prompt.
 			m.exitCode = 2
 			m.dontDoPendingDeletions()
 			return m, tea.Quit
 
 		case key.Matches(msg, keyQuit, keyQuitQ):
-			_, _ = fmt.Fprintln(os.Stderr) // Keep last item visible after prompt.
-			fmt.Println(m.path)            // Write to cd.
 			m.exitCode = 0
 			m.performPendingDeletions()
 			return m, tea.Quit
@@ -429,7 +429,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) updateSearch(msg tea.KeyMsg) {
-	m.search += string(msg.Runes)
+	m.search += msg.Key().Text
 	names := make([]string, len(m.files))
 	for i, fi := range m.files {
 		names[i] = fi.Name()
@@ -790,7 +790,6 @@ func (m *model) open() tea.Cmd {
 
 	var commandString string
 	if commandString, ok = openWith[extension(filePath)]; ok {
-
 	} else {
 		commandString = lookup([]string{"WALK_EDITOR", "EDITOR"}, "less")
 	}
